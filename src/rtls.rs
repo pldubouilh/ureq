@@ -89,11 +89,14 @@ fn root_certs() -> rustls::RootCertStore {
     root_store
 }
 
+use crate::certcheck::CertCheck;
+
 impl TlsConnector for Arc<rustls::ClientConfig> {
     fn connect(
         &self,
         dns_name: &str,
         mut tcp_stream: TcpStream,
+        cert_check: Option<&Box<dyn CertCheck>>,
     ) -> Result<Box<dyn ReadWrite>, Error> {
         let sni = rustls::ServerName::try_from(dns_name)
             .map_err(|e| ErrorKind::Dns.msg(format!("parsing '{}'", dns_name)).src(e))?;
@@ -106,6 +109,18 @@ impl TlsConnector for Arc<rustls::ClientConfig> {
                 .msg("tls connection init failed")
                 .src(e)
         })?;
+
+        if let Some(cert_check) = cert_check {
+            let callback = cert_check.as_ref();
+
+            if let Some(pc) = sess.peer_certificates() {
+                let certs: Vec<Vec<u8>> = pc.iter().map(|c| c.as_ref().to_vec()).collect();
+                callback.handle(Some(certs))?;
+            } else {
+                callback.handle(None)?;
+            }
+        }
+
         let stream = rustls::StreamOwned::new(sess, tcp_stream);
 
         Ok(Box::new(RustlsStream(stream)))

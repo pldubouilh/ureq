@@ -11,6 +11,7 @@ use chunked_transfer::Decoder as ChunkDecoder;
 #[cfg(feature = "socks-proxy")]
 use socks::{TargetAddr, ToTargetAddr};
 
+use crate::certcheck::CertCheck;
 use crate::proxy::Proxy;
 use crate::{error::Error, proxy::Proto};
 
@@ -27,6 +28,7 @@ pub trait TlsConnector: Send + Sync {
         &self,
         dns_name: &str,
         tcp_stream: TcpStream,
+        cert_check: Option<&Box<dyn CertCheck>>,
     ) -> Result<Box<dyn ReadWrite>, crate::error::Error>;
 }
 
@@ -331,13 +333,18 @@ pub(crate) fn connect_http(unit: &Unit, hostname: &str) -> Result<Stream, Error>
     connect_host(unit, hostname, port).map(Stream::from_tcp_stream)
 }
 
-pub(crate) fn connect_https(unit: &Unit, hostname: &str) -> Result<Stream, Error> {
+pub(crate) fn connect_https(
+    unit: &Unit,
+    hostname: &str,
+    cert_check: Option<&Box<dyn CertCheck>>,
+) -> Result<Stream, Error> {
     let port = unit.url.port().unwrap_or(443);
 
     let sock = connect_host(unit, hostname, port)?;
 
     let tls_conf = &unit.agent.config.tls_config;
-    let https_stream = tls_conf.connect(hostname, sock)?;
+
+    let https_stream = tls_conf.connect(hostname, sock, cert_check)?;
     Ok(Stream::new(https_stream))
 }
 

@@ -127,6 +127,8 @@ impl Request {
             }
         };
 
+        let agent_state = self.agent.state.clone();
+
         let request_fn = |req: Request| {
             let reader = payload.into_read();
             let unit = Unit::new(
@@ -138,7 +140,8 @@ impl Request {
                 deadline,
             );
 
-            unit::connect(unit, true, reader).map_err(|e| e.url(url.clone()))
+            let cert_check = agent_state.cert_check.as_ref();
+            unit::connect(unit, true, reader, cert_check).map_err(|e| e.url(url.clone()))
         };
 
         let response = if !self.agent.state.middleware.is_empty() {
@@ -150,7 +153,7 @@ impl Request {
 
             let next = MiddlewareNext { chain, request_fn };
 
-            // // Run middleware chain
+            // Run middleware chain
             next.handle(self)?
         } else {
             // Run the request_fn without any further indirection.

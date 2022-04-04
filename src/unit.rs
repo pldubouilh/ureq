@@ -19,6 +19,8 @@ use crate::response::Response;
 use crate::stream::{self, connect_test, Stream};
 use crate::Agent;
 
+use crate::certcheck::CertCheck;
+
 /// A Unit is fully-built Request, ready to execute.
 ///
 /// *Internal API*
@@ -158,10 +160,11 @@ pub(crate) fn connect(
     mut unit: Unit,
     use_pooled: bool,
     mut body: SizedReader,
+    cert_check: Option<&Box<dyn CertCheck>>,
 ) -> Result<Response, Error> {
     let mut history = vec![];
     let mut resp = loop {
-        let resp = connect_inner(&unit, use_pooled, body, &history)?;
+        let resp = connect_inner(&unit, use_pooled, body, &history, cert_check)?;
 
         // handle redirects
         if !(300..399).contains(&resp.status()) || unit.agent.config.redirects == 0 {
@@ -244,6 +247,7 @@ fn connect_inner(
     use_pooled: bool,
     body: SizedReader,
     history: &[Url],
+    cert_check: Option<&Box<dyn CertCheck>>,
 ) -> Result<Response, Error> {
     let host = unit
         .url
@@ -253,7 +257,7 @@ fn connect_inner(
     let url = &unit.url;
     let method = &unit.method;
     // open socket
-    let (mut stream, is_recycled) = connect_socket(unit, host, use_pooled)?;
+    let (mut stream, is_recycled) = connect_socket(unit, host, use_pooled, cert_check)?;
 
     if is_recycled {
         debug!("sending request (reused connection) {} {}", method, url);
@@ -269,7 +273,7 @@ fn connect_inner(
             // we try open a new connection, this time there will be
             // no connection in the pool. don't use it.
             // NOTE: this recurses at most once because `use_pooled` is `false`.
-            return connect_inner(unit, false, body, history);
+            return connect_inner(unit, false, body, history, cert_check);
         } else {
             // not a pooled connection, propagate the error.
             return Err(err.into());
@@ -301,7 +305,7 @@ fn connect_inner(
             debug!("retrying request {} {}: {}", method, url, err);
             let empty = Payload::Empty.into_read();
             // NOTE: this recurses at most once because `use_pooled` is `false`.
-            return connect_inner(unit, false, empty, history);
+            return connect_inner(unit, false, empty, history, cert_check);
         }
         Err(e) => return Err(e),
         Ok(resp) => resp,
@@ -343,7 +347,12 @@ fn extract_cookies(agent: &Agent, url: &Url) -> Option<Header> {
 }
 
 /// Connect the socket, either by using the pool or grab a new one.
-fn connect_socket(unit: &Unit, hostname: &str, use_pooled: bool) -> Result<(Stream, bool), Error> {
+fn connect_socket(
+    unit: &Unit,
+    hostname: &str,
+    use_pooled: bool,
+    cert_check: Option<&Box<dyn CertCheck>>,
+) -> Result<(Stream, bool), Error> {
     match unit.url.scheme() {
         "http" | "https" | "test" => (),
         scheme => return Err(ErrorKind::UnknownScheme.msg(format!("unknown scheme '{}'", scheme))),
@@ -364,7 +373,7 @@ fn connect_socket(unit: &Unit, hostname: &str, use_pooled: bool) -> Result<(Stre
     }
     let stream = match unit.url.scheme() {
         "http" => stream::connect_http(unit, hostname),
-        "https" => stream::connect_https(unit, hostname),
+        "https" => stream::connect_https(unit, hostname, cert_check),
         "test" => connect_test(unit),
         scheme => Err(ErrorKind::UnknownScheme.msg(format!("unknown scheme {}", scheme))),
     };

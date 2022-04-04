@@ -3,6 +3,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use url::Url;
 
+use crate::certcheck::CertCheck;
 use crate::middleware::Middleware;
 use crate::pool::ConnectionPool;
 use crate::proxy::Proxy;
@@ -44,6 +45,7 @@ pub struct AgentBuilder {
     cookie_store: Option<CookieStore>,
     resolver: ArcResolver,
     middleware: Vec<Box<dyn Middleware>>,
+    cert_check: Option<Box<dyn CertCheck>>,
 }
 
 /// Config as built by AgentBuilder and then static for the lifetime of the Agent.
@@ -113,6 +115,7 @@ pub(crate) struct AgentState {
     pub(crate) cookie_tin: CookieTin,
     pub(crate) resolver: ArcResolver,
     pub(crate) middleware: Vec<Box<dyn Middleware>>,
+    pub(crate) cert_check: Option<Box<dyn CertCheck>>,
 }
 
 impl Agent {
@@ -251,6 +254,7 @@ impl AgentBuilder {
             #[cfg(feature = "cookies")]
             cookie_store: None,
             middleware: vec![],
+            cert_check: None,
         }
     }
 
@@ -271,6 +275,7 @@ impl AgentBuilder {
                 cookie_tin: CookieTin::new(self.cookie_store.unwrap_or_else(CookieStore::default)),
                 resolver: self.resolver,
                 middleware: self.middleware,
+                cert_check: self.cert_check,
             }),
         }
     }
@@ -625,6 +630,11 @@ impl AgentBuilder {
     /// in the order they are added to the builder.
     pub fn middleware(mut self, m: impl Middleware) -> Self {
         self.middleware.push(Box::new(m));
+        self
+    }
+
+    pub fn cert_check(mut self, m: impl CertCheck) -> Self {
+        self.cert_check = Some(Box::new(m));
         self
     }
 }
